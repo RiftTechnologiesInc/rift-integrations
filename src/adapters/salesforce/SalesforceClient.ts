@@ -35,6 +35,7 @@ export class SalesforceClient implements CRMClient {
   private instanceUrl?: string;
   private apiVersion = 'v59.0';
   private accountFieldSet?: Set<string>;
+  private caseFieldSet?: Set<string>;
 
   constructor(private config: SalesforceConfig) {}
 
@@ -122,6 +123,17 @@ export class SalesforceClient implements CRMClient {
     const fields: string[] = (response.data?.fields || []).map((f: any) => f.name);
     this.accountFieldSet = new Set(fields);
     return this.accountFieldSet;
+  }
+
+  /**
+   * Fetch and cache Case object fields so we can adapt to org schema.
+   */
+  private async getCaseFieldSet(client: AxiosInstance): Promise<Set<string>> {
+    if (this.caseFieldSet) return this.caseFieldSet;
+    const response = await client.get('/sobjects/Case/describe');
+    const fields: string[] = (response.data?.fields || []).map((f: any) => f.name);
+    this.caseFieldSet = new Set(fields);
+    return this.caseFieldSet;
   }
 
   /**
@@ -525,17 +537,22 @@ export class SalesforceClient implements CRMClient {
   ): Promise<ServiceRequest> {
     try {
       const client = await this.getApiClient();
+      const fields = await this.getCaseFieldSet(client);
 
       // TODO: Adjust field mapping based on your Salesforce Case configuration
-      const sfData = {
+      const sfData: any = {
         Subject: data.title,
-        Description: data.description,
-        AccountId: data.clientId,
-        Priority: this.mapToSalesforcePriority(data.priority),
         Status: 'New',
-        Service_Request_Type__c: this.mapToSalesforceServiceRequestType(data.type),
-        OwnerId: data.assignedTo,
       };
+      if (data.description) sfData.Description = data.description;
+      if (data.clientId) sfData.AccountId = data.clientId;
+      if (data.priority) sfData.Priority = this.mapToSalesforcePriority(data.priority);
+      if (data.assignedTo) sfData.OwnerId = data.assignedTo;
+      if (fields.has('Service_Request_Type__c')) {
+        sfData.Service_Request_Type__c = this.mapToSalesforceServiceRequestType(
+          data.type
+        );
+      }
 
       const response = await client.post<SalesforceCreateResponse>(
         '/sobjects/Case',
