@@ -1,0 +1,38 @@
+{
+  "name": "rift-integrations",
+  "version": "0.1.0",
+  "description": "Backend integration playground for Rift wealth management CRM adapters",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node",
+    "test-auth": "ts-node src/sandbox/scripts/testAuth.ts",
+    "sandbox:create-client": "ts-node src/sandbox/scripts/createClient.ts",
+    "sandbox:create-service-request": "ts-node src/sandbox/scripts/createServiceRequest.ts",
+    "sandbox:advance-service-request": "ts-node src/sandbox/scripts/advanceServiceRequest.ts",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "crm",
+    "salesforce",
+    "fintech",
+    "wealth-management",
+    "integrations"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.7",
+    "dotenv": "^16.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.16",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}
