@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "lambda-dist",
+    "module": "CommonJS",
+    "target": "ES2020",
+    "esModuleInterop": true
+  },
+  "include": ["src/lambda/**/*.ts"]
+}

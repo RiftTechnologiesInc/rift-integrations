@@ -114,6 +114,109 @@ Updates the status of a service request through its workflow stages.
 
 ---
 
+## Fastify API (Production-Style)
+
+This repo includes a small Fastify API so your UI can call Salesforce through the adapter.
+
+### Setup
+
+1. Add an API key to `.env` (you choose the value):
+   ```bash
+   API_KEY=super-secret-change-me
+   ```
+2. Optional: enable UI JWT auth (Bearer tokens):
+   ```bash
+   UI_JWT_SECRET=your-jwt-secret
+   ```
+3. Optional: webhook secret for Salesforce callbacks:
+   ```bash
+   SALESFORCE_WEBHOOK_SECRET=your-webhook-secret
+   ```
+4. OAuth (multi-tenant) configuration:
+   ```bash
+   SALESFORCE_CLIENT_ID=your_connected_app_consumer_key
+   SALESFORCE_CLIENT_SECRET=your_connected_app_consumer_secret
+   SALESFORCE_OAUTH_REDIRECT_URI=http://127.0.0.1:3000/oauth/salesforce/callback
+   ```
+5. Supabase (tenant storage):
+   ```bash
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+   SUPABASE_TENANTS_TABLE=salesforce_tenants
+   SUPABASE_CLIENTS_TABLE=salesforce_clients
+   SUPABASE_SERVICE_REQUESTS_TABLE=salesforce_service_requests
+   ```
+6. Token encryption (required):
+   ```bash
+   # 32-byte base64 string (store securely)
+   TENANT_TOKEN_ENCRYPTION_KEY=base64-32-byte-key
+   ```
+
+6. Start the server:
+   ```bash
+   npm run api:dev
+   ```
+
+### Auth
+
+All endpoints (except `/health`) require a key. Send either:
+
+- `x-api-key: <API_KEY>`
+- or `Authorization: Bearer <API_KEY>`
+
+If `UI_JWT_SECRET` is set, you can also send a JWT in:
+- `Authorization: Bearer <JWT>`
+
+### Multi-tenant usage
+
+To route requests to a specific firm’s Salesforce org, include:
+- `x-tenant-id: <tenantId>`
+
+If omitted, the server uses the default JWT configuration.
+
+Tenant access tokens are automatically refreshed using the stored refresh token.
+Tokens are encrypted at rest using AES-256-GCM with `TENANT_TOKEN_ENCRYPTION_KEY`.
+
+### Endpoints
+
+**GET `/health`**
+Returns `{ ok: true }`.
+
+**GET `/clients`**
+Optional query params:
+- `clientType` (e.g. `INDIVIDUAL`, `JOINT`, `TRUST`, `CORPORATE`)
+- `minAUM`
+- `maxAUM`
+- `limit`
+- `offset`
+- `orderBy` (`CreatedDate`, `LastModifiedDate`, `Name`)
+- `orderDir` (`ASC`, `DESC`)
+
+Example:
+```bash
+curl -H "x-api-key: your-key" "http://127.0.0.1:3000/clients?clientType=INDIVIDUAL"
+```
+
+**POST `/clients`**
+Creates a client (Account/Contact).
+```bash
+curl -X POST http://127.0.0.1:3000/clients \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-key" \
+  -d '{"name":"Jane Doe","email":"jane@example.com","phone":"+1-555-0000"}'
+```
+
+**POST `/service-requests`**
+Creates a service request (Case).
+```bash
+curl -X POST http://127.0.0.1:3000/service-requests \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-key" \
+  -d '{"title":"Onboarding","clientId":"001...","description":"New client"}'
+```
+
+---
+
 ## Core Models
 
 ### Client
@@ -256,3 +359,183 @@ Output: `dist/` directory with compiled JavaScript and type definitions.
 ## License
 
 MIT
+**GET `/service-requests`**
+Optional query params:
+- `clientId`
+- `status` (`NEW`, `IN_PROGRESS`, `PENDING_CLIENT`, `PENDING_APPROVAL`, `COMPLETED`, `CANCELLED`)
+- `limit`
+- `offset`
+- `orderBy` (`CreatedDate`, `LastModifiedDate`)
+- `orderDir` (`ASC`, `DESC`)
+
+**PATCH `/service-requests/:id`**
+Updates a service request status.
+```bash
+curl -X PATCH http://127.0.0.1:3000/service-requests/500... \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-key" \
+  -d '{"status":"IN_PROGRESS"}'
+```
+
+**POST `/webhooks/salesforce`**
+Webhook endpoint for Salesforce callbacks (CDC/Platform Events).
+```bash
+curl -X POST http://127.0.0.1:3000/webhooks/salesforce \
+  -H "x-webhook-secret: your-webhook-secret" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"payload"}'
+```
+
+Webhook events are stored locally in `data/webhook-events.json`. A minimal
+CDC mapping for Accounts/Cases is stored in `data/sync-state.json`.
+Webhook events are also upserted into Supabase cache tables.
+
+**GET `/db/clients`**
+Reads cached clients from Supabase for the tenant.
+
+**GET `/db/service-requests`**
+Reads cached service requests from Supabase for the tenant.
+
+---
+
+## Multi-tenant OAuth (Firms Connect Their Own Salesforce)
+
+1. Ensure your Connected App has:
+   - OAuth enabled
+   - Scopes: `api` (or `full`), and `refresh_token, offline_access`
+   - Permitted Users: `All users may self-authorize`
+
+2. Start OAuth for a firm:
+```bash
+http://127.0.0.1:3000/oauth/salesforce/start?tenantId=firm_123&loginUrl=https://login.salesforce.com
+```
+
+3. Complete the Salesforce login/consent. The callback stores tokens in Supabase.
+
+4. List connected tenants:
+```bash
+http://127.0.0.1:3000/oauth/salesforce/tenants
+```
+
+### Supabase table schema
+
+Create this table in Supabase:
+```sql
+create table if not exists salesforce_tenants (
+  tenant_id text primary key,
+  login_url text not null,
+  instance_url text not null,
+  access_token text not null,
+  refresh_token text,
+  issued_at text,
+  id_url text,
+  updated_at timestamptz default now()
+);
+```
+
+Create cache tables for synced data:
+```sql
+create table if not exists salesforce_clients (
+  tenant_id text not null,
+  sf_id text not null,
+  name text,
+  email text,
+  phone text,
+  last_changed timestamptz,
+  primary key (tenant_id, sf_id)
+);
+
+create table if not exists salesforce_service_requests (
+  tenant_id text not null,
+  sf_id text not null,
+  subject text,
+  status text,
+  priority text,
+  account_id text,
+  last_changed timestamptz,
+  primary key (tenant_id, sf_id)
+);
+```
+
+### Migrate local tenants.json (optional)
+
+If you already connected tenants before Supabase:
+```bash
+npm run migrate:tenants
+```
+
+### Re-encrypt existing Supabase tokens
+
+If tokens are already stored in plaintext in Supabase:
+```bash
+npm run reencrypt:tenants
+```
+
+---
+
+## AWS CDK (Lean Webhook Deployment)
+
+This deploys a small Lambda + API Gateway that only handles:
+`POST /webhooks/salesforce`
+
+### Prereqs
+
+- AWS credentials configured (`aws configure`)
+- Node.js >= 18
+- CDK installed: `npm i -g aws-cdk`
+
+### Env (required)
+
+Set these before deploy (same values you use locally):
+```bash
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_CLIENTS_TABLE=salesforce_clients
+SUPABASE_SERVICE_REQUESTS_TABLE=salesforce_service_requests
+SALESFORCE_WEBHOOK_SECRET=...
+```
+
+### Deploy
+
+```bash
+npm install
+npm run cdk:bootstrap
+npm run cdk:deploy
+```
+
+The deploy output includes `WebhookUrl`. Use that as your Salesforce CDC/webhook endpoint.
+
+### Git ignore
+
+These files are generated and should not be committed:
+- `cdk.out/`
+- `lambda-dist/`
+- `cdk-outputs.json`
+
+---
+
+## Local CDC Listener (Free Dev Test)
+
+Runs a local process that subscribes to Salesforce CDC and forwards events
+to your AWS webhook.
+
+### Env
+```bash
+CDC_TENANT_ID=firm_123
+CDC_WEBHOOK_URL=https://ee25hkoqrc.execute-api.us-east-1.amazonaws.com/prod/webhooks/salesforce
+SALESFORCE_WEBHOOK_SECRET=...
+SUPABASE_URL=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_TENANTS_TABLE=salesforce_tenants
+TENANT_TOKEN_ENCRYPTION_KEY=...
+SALESFORCE_CLIENT_ID=...
+SALESFORCE_CLIENT_SECRET=...
+```
+
+### Run
+```bash
+npm run cdc:listen
+```
+
+### Test
+Update an Account/Case in Salesforce and watch Supabase tables update.

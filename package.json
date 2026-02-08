@@ -7,6 +7,12 @@
   "scripts": {
     "build": "tsc",
     "dev": "ts-node",
+    "api:dev": "ts-node src/api/server.ts",
+    "migrate:tenants": "ts-node src/api/scripts/migrateTenantsToSupabase.ts",
+    "reencrypt:tenants": "ts-node src/api/scripts/reencryptTenantsInSupabase.ts",
+    "cdc:listen": "ts-node src/cdc/listener.ts",
+    "cdk:bootstrap": "cdk bootstrap",
+    "cdk:deploy": "cdk deploy",
     "test-auth": "ts-node src/sandbox/scripts/testAuth.ts",
     "sandbox:create-client": "ts-node src/sandbox/scripts/createClient.ts",
     "sandbox:create-service-request": "ts-node src/sandbox/scripts/createServiceRequest.ts",
@@ -25,11 +31,18 @@
   "dependencies": {
     "axios": "^1.6.7",
     "dotenv": "^16.4.1",
-    "jsonwebtoken": "^9.0.2"
+    "fastify": "^4.28.1",
+    "jsonwebtoken": "^9.0.2",
+    "@supabase/supabase-js": "^2.49.1",
+    "aws-cdk-lib": "^2.133.0",
+    "constructs": "^10.3.0",
+    "jsforce": "^1.11.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.16",
     "@types/jsonwebtoken": "^9.0.6",
+    "@types/jsforce": "^1.9.9",
+    "esbuild": "^0.21.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   },

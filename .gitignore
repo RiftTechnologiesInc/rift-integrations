@@ -5,6 +5,8 @@ package-lock.json
 # Build output
 dist/
 *.tsbuildinfo
+cdk.out/
+lambda-dist/
 
 # Environment variables
 .env
@@ -35,3 +37,9 @@ private.key
 salesforce.key
 salesforce.crt
 salesforce.pub
+
+# Local data
+data/
+
+# CDK outputs
+cdk-outputs.json

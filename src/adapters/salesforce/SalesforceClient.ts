@@ -38,6 +38,8 @@ export class SalesforceClient implements CRMClient {
   private apiVersion = 'v59.0';
   private accountFieldSet?: Set<string>;
   private caseFieldSet?: Set<string>;
+  private staticAccessToken?: string;
+  private staticInstanceUrl?: string;
 
   constructor(private config: SalesforceConfig) {}
 
@@ -47,6 +49,12 @@ export class SalesforceClient implements CRMClient {
    */
   private async authenticate(): Promise<void> {
     try {
+      if (this.staticAccessToken && this.staticInstanceUrl) {
+        this.accessToken = this.staticAccessToken;
+        this.instanceUrl = this.staticInstanceUrl;
+        return;
+      }
+
       if (!this.config.clientId) {
         throw new Error('Missing SALESFORCE_CLIENT_ID for JWT auth');
       }
@@ -127,6 +135,23 @@ export class SalesforceClient implements CRMClient {
   }
 
   /**
+   * Use a tenant's OAuth token directly (Auth Code flow).
+   */
+  static fromOAuthAccessToken(
+    instanceUrl: string,
+    accessToken: string
+  ): SalesforceClient {
+    const client = new SalesforceClient({
+      loginUrl: instanceUrl,
+      username: 'tenant',
+      clientId: 'tenant',
+    });
+    client.staticAccessToken = accessToken;
+    client.staticInstanceUrl = instanceUrl;
+    return client;
+  }
+
+  /**
    * Fetch and cache Account object fields so we can adapt to org schema.
    */
   private async getAccountFieldSet(client: AxiosInstance): Promise<Set<string>> {
@@ -146,6 +171,19 @@ export class SalesforceClient implements CRMClient {
     const fields: string[] = (response.data?.fields || []).map((f: any) => f.name);
     this.caseFieldSet = new Set(fields);
     return this.caseFieldSet;
+  }
+
+  /**
+   * Build SOQL for Case based on available fields in this org.
+   */
+  private buildCaseQuery(fields: Set<string>): string {
+    const selectFields: string[] = ['Id', 'Subject', 'Status', 'Priority', 'CreatedDate', 'LastModifiedDate'];
+    if (fields.has('Description')) selectFields.push('Description');
+    if (fields.has('AccountId')) selectFields.push('AccountId');
+    if (fields.has('OwnerId')) selectFields.push('OwnerId');
+    if (fields.has('Service_Request_Type__c')) selectFields.push('Service_Request_Type__c');
+
+    return `SELECT ${selectFields.join(', ')} FROM Case`;
   }
 
   /**
@@ -377,7 +415,12 @@ export class SalesforceClient implements CRMClient {
   /**
    * List all clients matching optional filters
    */
-  async listClients(filters?: ClientFilters): Promise<Client[]> {
+  async listClients(filters?: ClientFilters & {
+    limit?: number;
+    offset?: number;
+    orderBy?: 'CreatedDate' | 'LastModifiedDate' | 'Name';
+    orderDir?: 'ASC' | 'DESC';
+  }): Promise<Client[]> {
     try {
       const client = await this.getApiClient();
       const fields = await this.getAccountFieldSet(client);
@@ -402,12 +445,52 @@ export class SalesforceClient implements CRMClient {
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
       }
+      if (filters?.orderBy) {
+        const dir = filters.orderDir || 'DESC';
+        query += ` ORDER BY ${filters.orderBy} ${dir}`;
+      }
+      if (filters?.limit) {
+        query += ` LIMIT ${filters.limit}`;
+      }
+      if (filters?.offset) {
+        query += ` OFFSET ${filters.offset}`;
+      }
 
       const response = await client.get<SalesforceQueryResponse<SalesforceAccount>>(
         `/query?q=${encodeURIComponent(query)}`
       );
 
       return response.data.records.map((record) => this.mapToClient(record));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Find a client by email (Account PersonEmail/Email or related Contact.Email)
+   */
+  async findClientByEmail(email: string): Promise<Client | null> {
+    try {
+      const client = await this.getApiClient();
+      const fields = await this.getAccountFieldSet(client);
+      const includeContacts =
+        !fields.has('PersonEmail') && !fields.has('Email');
+
+      const safeEmail = email.replace(/'/g, "\\'");
+      const conditions: string[] = [];
+      if (fields.has('PersonEmail')) conditions.push(`PersonEmail = '${safeEmail}'`);
+      if (fields.has('Email')) conditions.push(`Email = '${safeEmail}'`);
+      conditions.push(`Id IN (SELECT AccountId FROM Contact WHERE Email = '${safeEmail}')`);
+
+      let query = this.buildAccountQuery(fields, includeContacts);
+      query += ` WHERE (${conditions.join(' OR ')}) LIMIT 1`;
+
+      const response = await client.get<SalesforceQueryResponse<SalesforceAccount>>(
+        `/query?q=${encodeURIComponent(query)}`
+      );
+
+      if (response.data.records.length === 0) return null;
+      return this.mapToClient(response.data.records[0]);
     } catch (error) {
       return this.handleError(error);
     }
@@ -578,6 +661,53 @@ export class SalesforceClient implements CRMClient {
       }
 
       return this.getServiceRequest(response.data.id);
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * List service requests (Cases)
+   */
+  async listServiceRequests(filters?: {
+    clientId?: string;
+    status?: ServiceRequestStatus;
+    limit?: number;
+    offset?: number;
+    orderBy?: 'CreatedDate' | 'LastModifiedDate';
+    orderDir?: 'ASC' | 'DESC';
+  }): Promise<ServiceRequest[]> {
+    try {
+      const client = await this.getApiClient();
+      const fields = await this.getCaseFieldSet(client);
+
+      let query = this.buildCaseQuery(fields);
+      const conditions: string[] = [];
+      if (filters?.clientId && fields.has('AccountId')) {
+        conditions.push(`AccountId = '${filters.clientId.replace(/'/g, "\\'")}'`);
+      }
+      if (filters?.status) {
+        conditions.push(`Status = '${this.mapToSalesforceStatus(filters.status)}'`);
+      }
+      if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+      }
+      if (filters?.orderBy) {
+        const dir = filters.orderDir || 'DESC';
+        query += ` ORDER BY ${filters.orderBy} ${dir}`;
+      }
+      if (filters?.limit) {
+        query += ` LIMIT ${filters.limit}`;
+      }
+      if (filters?.offset) {
+        query += ` OFFSET ${filters.offset}`;
+      }
+
+      const response = await client.get<SalesforceQueryResponse<SalesforceCase>>(
+        `/query?q=${encodeURIComponent(query)}`
+      );
+
+      return response.data.records.map((record) => this.mapToServiceRequest(record));
     } catch (error) {
       return this.handleError(error);
     }
