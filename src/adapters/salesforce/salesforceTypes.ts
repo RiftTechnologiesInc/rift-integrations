@@ -14,10 +14,12 @@ export interface SalesforceAuthResponse {
 export interface SalesforceConfig {
   loginUrl: string;
   username: string;
-  password: string;
-  securityToken: string;
+  password?: string;
+  securityToken?: string;
   clientId?: string; // Optional - only needed for OAuth flows
   clientSecret?: string; // Optional - only needed for OAuth flows
+  privateKey?: string; // Optional - for JWT bearer flow
+  privateKeyPath?: string; // Optional - path to PEM for JWT bearer flow
 }
 
 export interface SalesforceQueryResponse<T> {

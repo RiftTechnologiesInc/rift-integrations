@@ -32,3 +32,6 @@ yarn-error.log*
 # Salesforce credentials
 private.key
 *.pem
+salesforce.key
+salesforce.crt
+salesforce.pub

@@ -1,4 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
+import fs from 'fs';
+import jwt from 'jsonwebtoken';
 import {
   SalesforceConfig,
   SalesforceAccount,
@@ -40,56 +42,66 @@ export class SalesforceClient implements CRMClient {
   constructor(private config: SalesforceConfig) {}
 
   /**
-   * Authenticate with Salesforce using SOAP API login
-   * This method doesn't require a Connected App
+   * Authenticate with Salesforce using OAuth JWT Bearer flow.
+   * Requires a Connected App + RSA key pair (private key in env or file).
    */
   private async authenticate(): Promise<void> {
     try {
-      const soapBody = `<?xml version="1.0" encoding="utf-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:urn="urn:partner.soap.sforce.com">
-  <soapenv:Body>
-    <urn:login>
-      <urn:username>${this.config.username}</urn:username>
-      <urn:password>${this.config.password}${this.config.securityToken}</urn:password>
-    </urn:login>
-  </soapenv:Body>
-</soapenv:Envelope>`;
+      if (!this.config.clientId) {
+        throw new Error('Missing SALESFORCE_CLIENT_ID for JWT auth');
+      }
+
+      const privateKey =
+        this.config.privateKey ||
+        (this.config.privateKeyPath
+          ? fs.readFileSync(this.config.privateKeyPath, 'utf8')
+          : undefined);
+
+      if (!privateKey) {
+        throw new Error(
+          'Missing private key for JWT auth (set SALESFORCE_PRIVATE_KEY or SALESFORCE_PRIVATE_KEY_PATH)'
+        );
+      }
+
+      const now = Math.floor(Date.now() / 1000);
+      const assertion = jwt.sign(
+        {
+          iss: this.config.clientId,
+          sub: this.config.username,
+          aud: this.config.loginUrl,
+          exp: now + 3 * 60,
+        },
+        privateKey,
+        { algorithm: 'RS256' }
+      );
+
+      const body = new URLSearchParams({
+        grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        assertion,
+      });
 
       const response = await axios.post(
-        // Use Partner API endpoint for login; Enterprise endpoint doesn't expose login.
-        `${this.config.loginUrl}/services/Soap/u/59.0`,
-        soapBody,
+        `${this.config.loginUrl}/services/oauth2/token`,
+        body.toString(),
         {
           headers: {
-            'Content-Type': 'text/xml; charset=UTF-8',
-            'SOAPAction': 'login',
+            'Content-Type': 'application/x-www-form-urlencoded',
           },
         }
       );
 
-      // Parse SOAP response to extract session ID and server URL
-      const sessionIdMatch = response.data.match(/<sessionId>(.+?)<\/sessionId>/);
-      const serverUrlMatch = response.data.match(/<serverUrl>(.+?)<\/serverUrl>/);
-
-      if (!sessionIdMatch || !serverUrlMatch) {
-        throw new Error('Invalid SOAP response - missing session ID or server URL');
+      const { access_token, instance_url } = response.data || {};
+      if (!access_token || !instance_url) {
+        throw new Error('Invalid OAuth response - missing access_token or instance_url');
       }
 
-      this.accessToken = sessionIdMatch[1];
-
-      // Extract instance URL from server URL (e.g., https://instance.salesforce.com/services/... -> https://instance.salesforce.com)
-      const serverUrl = serverUrlMatch[1];
-      const urlMatch = serverUrl.match(/(https:\/\/[^\/]+)/);
-      if (!urlMatch) {
-        throw new Error('Could not parse instance URL from server URL');
-      }
-      this.instanceUrl = urlMatch[1];
+      this.accessToken = access_token;
+      this.instanceUrl = instance_url;
     } catch (error: any) {
-      if (error.response?.data && typeof error.response.data === 'string') {
-        const faultMatch = error.response.data.match(/<faultstring>(.+?)<\/faultstring>/);
-        if (faultMatch) {
-          throw new AuthenticationError(`Salesforce login failed: ${faultMatch[1]}`);
-        }
+      if (error.response?.data?.error_description) {
+        throw new AuthenticationError(
+          `Salesforce login failed: ${error.response.data.error_description}`
+        );
       }
       throw new AuthenticationError(
         `Failed to authenticate with Salesforce: ${error.message}`

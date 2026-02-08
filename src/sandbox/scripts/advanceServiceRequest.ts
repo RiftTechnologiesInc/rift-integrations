@@ -7,12 +7,13 @@ dotenv.config();
 async function main() {
   console.log('🚀 Rift Integrations - Advance Service Request Sandbox\n');
 
-  // Initialize Salesforce client (using SOAP login - no Connected App needed)
+  // Initialize Salesforce client (OAuth Username-Password flow)
   const sfClient = new SalesforceClient({
     loginUrl: process.env.SALESFORCE_LOGIN_URL || 'https://login.salesforce.com',
     username: process.env.SALESFORCE_USERNAME!,
-    password: process.env.SALESFORCE_PASSWORD!,
-    securityToken: process.env.SALESFORCE_SECURITY_TOKEN!,
+    clientId: process.env.SALESFORCE_CLIENT_ID!,
+    privateKey: process.env.SALESFORCE_PRIVATE_KEY!,
+    privateKeyPath: process.env.SALESFORCE_PRIVATE_KEY_PATH!,
   });
 
   try {

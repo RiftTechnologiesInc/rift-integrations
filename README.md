@@ -61,17 +61,26 @@ npm install
 
 ### Configuration
 
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Fill in your Salesforce credentials:
+1. Fill in your Salesforce credentials in `.env`:
    - **Login URL**: `https://login.salesforce.com` (or `https://test.salesforce.com` for sandbox)
    - **Username**: Your Salesforce username
-   - **Password**: Your Salesforce password
-   - **Security Token**: Reset via Salesforce Setup → My Personal Information → Reset My Security Token
-   - **Client ID & Secret**: Create a Connected App in Salesforce Setup
+   - **Client ID**: Connected App Consumer Key
+   - **Private Key Path**: `./salesforce.key` (JWT bearer flow)
+
+2. JWT Bearer setup (recommended):
+   - Create a Connected App (OAuth enabled).
+   - Add OAuth scope: **Perform requests on your behalf at any time (refresh_token, offline_access)**.
+   - Set **Permitted Users** = **Admin approved users are pre-authorized**.
+   - Create a permission set and assign it to your user, then associate it with the Connected App.
+   - Generate an RSA key pair and upload the **certificate** to the Connected App.
+
+Example `.env`:
+```bash
+SALESFORCE_LOGIN_URL=https://login.salesforce.com
+SALESFORCE_USERNAME=you@example.com
+SALESFORCE_CLIENT_ID=your_consumer_key
+SALESFORCE_PRIVATE_KEY_PATH=./salesforce.key
+```
 
 ---
 
