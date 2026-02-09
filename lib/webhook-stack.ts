@@ -24,6 +24,12 @@ export class WebhookStack extends cdk.Stack {
         SUPABASE_SERVICE_REQUESTS_TABLE:
           process.env.SUPABASE_SERVICE_REQUESTS_TABLE ||
           'salesforce_service_requests',
+        SUPABASE_TENANTS_TABLE:
+          process.env.SUPABASE_TENANTS_TABLE || 'salesforce_tenants',
+        TENANT_TOKEN_ENCRYPTION_KEY:
+          process.env.TENANT_TOKEN_ENCRYPTION_KEY || '',
+        SALESFORCE_CLIENT_ID: process.env.SALESFORCE_CLIENT_ID || '',
+        SALESFORCE_CLIENT_SECRET: process.env.SALESFORCE_CLIENT_SECRET || '',
         SALESFORCE_WEBHOOK_SECRET: process.env.SALESFORCE_WEBHOOK_SECRET || '',
       },
     });

@@ -96,13 +96,23 @@ async function refreshAccessToken(loginUrl: string, refreshToken: string) {
 }
 
 async function postToWebhook(payload: any) {
-  await axios.post(webhookUrl!, payload, {
-    headers: {
-      'Content-Type': 'application/json',
-      'x-webhook-secret': webhookSecret!,
-      'x-tenant-id': tenantId!,
-    },
-  });
+  try {
+    const resp = await axios.post(webhookUrl!, payload, {
+      headers: {
+        'Content-Type': 'application/json',
+        'x-webhook-secret': webhookSecret!,
+        'x-tenant-id': tenantId!,
+      },
+    });
+    // eslint-disable-next-line no-console
+    console.log('Webhook POST status', resp.status);
+  } catch (err: any) {
+    const status = err?.response?.status;
+    const data = err?.response?.data;
+    // eslint-disable-next-line no-console
+    console.error('Webhook POST failed', status, data || err?.message);
+    throw err;
+  }
 }
 
 async function main() {
@@ -121,10 +131,30 @@ async function main() {
   const conn = new jsforce.Connection({ accessToken, instanceUrl });
 
   conn.streaming.topic('/data/AccountChangeEvent').subscribe(async (message: any) => {
+    const header = message?.payload?.ChangeEventHeader;
+    // eslint-disable-next-line no-console
+    console.log(
+      'CDC AccountChangeEvent',
+      JSON.stringify({
+        replayId: message?.event?.replayId,
+        recordIds: header?.recordIds,
+        changeType: header?.changeType,
+      })
+    );
     await postToWebhook(message);
   });
 
   conn.streaming.topic('/data/CaseChangeEvent').subscribe(async (message: any) => {
+    const header = message?.payload?.ChangeEventHeader;
+    // eslint-disable-next-line no-console
+    console.log(
+      'CDC CaseChangeEvent',
+      JSON.stringify({
+        replayId: message?.event?.replayId,
+        recordIds: header?.recordIds,
+        changeType: header?.changeType,
+      })
+    );
     await postToWebhook(message);
   });
 

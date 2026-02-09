@@ -1,5 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
+import * as dotenv from 'dotenv';
 import { WebhookStack } from '../lib/webhook-stack';
+
+dotenv.config({ override: true });
 
 const app = new cdk.App();
 
