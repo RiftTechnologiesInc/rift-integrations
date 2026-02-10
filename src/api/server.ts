@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
 import path from 'path';
@@ -24,6 +25,12 @@ import {
 dotenv.config();
 
 const server = Fastify({ logger: true });
+
+// Enable CORS for frontend
+server.register(cors, {
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  credentials: true,
+});
 const apiKey = process.env.API_KEY;
 const uiJwtSecret = process.env.UI_JWT_SECRET;
 const webhookSecret = process.env.SALESFORCE_WEBHOOK_SECRET;
@@ -392,6 +399,9 @@ async function withTenantClient<T>(
 }
 
 server.addHook('preHandler', async (request, reply) => {
+  // Allow CORS preflight requests
+  if (request.method === 'OPTIONS') return;
+
   if (request.url.startsWith('/health')) return;
   if (request.url.startsWith('/webhooks')) return;
   if (request.url.startsWith('/oauth')) return;
@@ -836,10 +846,15 @@ server.patch('/service-requests/:id', async (request, reply) => {
 const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '127.0.0.1';
 
-server.listen({ port, host }, (err, address) => {
-  if (err) {
+async function start() {
+  try {
+    await server.ready();
+    await server.listen({ port, host });
+    server.log.info(`API listening on ${host}:${port}`);
+  } catch (err) {
     server.log.error(err);
     process.exit(1);
   }
-  server.log.info(`API listening on ${address}`);
-});
+}
+
+start();
