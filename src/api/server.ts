@@ -312,16 +312,6 @@ function isEnumValue<T extends Record<string, string>>(val: any, e: T): val is T
   return Object.values(e).includes(val);
 }
 
-function getSalesforceClient() {
-  return new SalesforceClient({
-    loginUrl: process.env.SALESFORCE_LOGIN_URL || 'https://login.salesforce.com',
-    username: process.env.SALESFORCE_USERNAME!,
-    clientId: process.env.SALESFORCE_CLIENT_ID!,
-    privateKey: process.env.SALESFORCE_PRIVATE_KEY!,
-    privateKeyPath: process.env.SALESFORCE_PRIVATE_KEY_PATH!,
-  });
-}
-
 async function getTenantConnection(request: any): Promise<TenantConnection | null> {
   const tenantId =
     request.headers['x-tenant-id'] ||
@@ -388,8 +378,7 @@ async function withTenantClient<T>(
   });
 
   if (!tenantId) {
-    console.log('[withTenantClient] No tenant ID found, using default client');
-    return action(getSalesforceClient());
+    throw new ValidationError('x-tenant-id header is required. Connect Salesforce and retry.');
   }
 
   console.log('[withTenantClient] Looking up tenant:', tenantId);
@@ -482,7 +471,8 @@ server.get('/oauth/salesforce/start', async (request, reply) => {
     `&redirect_uri=${encodeURIComponent(oauthRedirectUri)}` +
     `&state=${encodeURIComponent(state)}` +
     `&code_challenge=${encodeURIComponent(challenge)}` +
-    `&code_challenge_method=S256`;
+    `&code_challenge_method=S256` +
+    `&prompt=login`;
 
   return reply.redirect(authUrl);
 });
@@ -875,3 +865,8 @@ async function start() {
 }
 
 start();
+
+
+
+
+
