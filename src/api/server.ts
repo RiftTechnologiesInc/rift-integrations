@@ -75,6 +75,7 @@ function writeJsonFile(filePath: string, data: unknown) {
 
 type TenantConnection = {
   tenantId: string;
+  userId?: string;
   loginUrl: string;
   instanceUrl: string;
   accessToken: string;
@@ -233,6 +234,7 @@ async function upsertTenant(conn: TenantConnection): Promise<void> {
     .upsert(
       {
         tenant_id: conn.tenantId,
+        user_id: conn.userId || null,
         login_url: conn.loginUrl,
         instance_url: conn.instanceUrl,
         access_token: encryptSecret(conn.accessToken),
@@ -378,11 +380,22 @@ async function withTenantClient<T>(
     request.headers['x-tenant'] ||
     request.headers['x-firm-id'];
 
+  console.log('[withTenantClient] Headers:', {
+    'x-tenant-id': request.headers['x-tenant-id'],
+    'x-tenant': request.headers['x-tenant'],
+    'x-firm-id': request.headers['x-firm-id'],
+    tenantId
+  });
+
   if (!tenantId) {
+    console.log('[withTenantClient] No tenant ID found, using default client');
     return action(getSalesforceClient());
   }
 
+  console.log('[withTenantClient] Looking up tenant:', tenantId);
   let conn = await getTenantConnection(request);
+  console.log('[withTenantClient] Tenant connection:', conn ? 'FOUND' : 'NOT FOUND');
+
   if (!conn) {
     throw new NotFoundError('Tenant', String(tenantId));
   }
@@ -440,14 +453,17 @@ server.get('/oauth/salesforce/start', async (request, reply) => {
     return reply.status(500).send({ error: 'OAuth env not configured' });
   }
 
-  const query = request.query as { tenantId?: string; loginUrl?: string };
+  const query = request.query as { tenantId?: string; userId?: string; loginUrl?: string };
   if (!query.tenantId) {
     return reply.status(400).send({ error: 'tenantId is required' });
+  }
+  if (!query.userId) {
+    return reply.status(400).send({ error: 'userId is required' });
   }
 
   const loginUrl = query.loginUrl || 'https://login.salesforce.com';
   const state = Buffer.from(
-    JSON.stringify({ tenantId: query.tenantId, loginUrl })
+    JSON.stringify({ tenantId: query.tenantId, userId: query.userId, loginUrl })
   ).toString('base64url');
 
   // PKCE (required by some orgs)
@@ -485,7 +501,7 @@ server.get('/oauth/salesforce/callback', async (request, reply) => {
 
     const state = JSON.parse(
       Buffer.from(query.state, 'base64url').toString('utf8')
-    ) as { tenantId: string; loginUrl: string };
+    ) as { tenantId: string; userId: string; loginUrl: string };
 
     const pkce = readPkce();
     const verifier = pkce[query.state]?.verifier;
@@ -509,6 +525,7 @@ server.get('/oauth/salesforce/callback', async (request, reply) => {
 
     await upsertTenant({
       tenantId: state.tenantId,
+      userId: state.userId,
       loginUrl: state.loginUrl,
       instanceUrl: tokenResp.data.instance_url,
       accessToken: tokenResp.data.access_token,
